@@ -1210,25 +1210,16 @@
   // ============================
   // GOOGLE SHEETS URL CONFIG
   // ============================
-  let GOOGLE_SHEETS_URL = localStorage.getItem('nuevo_sol_sheets_url') || 'https://script.google.com/macros/s/AKfycby6TgdPe5P8TxXnEcNbGVdpxYIezyTft6DMqbeQpsKPUh7uGfKgQAlRAeAv-Zn9vz0/exec';
+  const GOOGLE_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwOsvtD3Q3vJpxlTbIhAsywyGhJyZtkitv8iCyKsLWhSmGjWeTm0lEpLJ5C_eFZnWw/exec';
+  // Limpiar cualquier URL vieja guardada en el navegador
+  localStorage.removeItem('nuevo_sol_sheets_url');
 
   function saveGoogleSheetsUrl() {
-    const input = document.getElementById('sheetsUrlInput');
-    const url = input.value.trim();
-    if (!url) {
-      showToast('Por favor, ingresa la URL del Web App', 'error');
-      return;
-    }
-    GOOGLE_SHEETS_URL = url;
-    localStorage.setItem('nuevo_sol_sheets_url', url);
-    showToast('✅ URL guardada correctamente. Ya puedes enviar datos.', 'success');
+    // Ya no es necesario, pero lo dejamos vacío por si acaso algún botón lo llama
     document.getElementById('configBanner').style.display = 'none';
   }
 
-  if (GOOGLE_SHEETS_URL) {
-    document.getElementById('sheetsUrlInput').value = GOOGLE_SHEETS_URL;
-    document.getElementById('configBanner').style.display = 'none';
-  }
+  document.getElementById('configBanner').style.display = 'none';
 
   // ============================
   // ACCORDION (SECCIONES)
