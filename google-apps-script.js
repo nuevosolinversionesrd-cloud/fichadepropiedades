@@ -77,27 +77,44 @@
 // ============================================================
 
 /**
+ * Traduce un texto del español al inglés de forma segura.
+ * Usa el servicio nativo de Apps Script (LanguageApp) — sin costo adicional.
+ * @param {string} text - Texto a traducir
+ * @returns {string} - Texto traducido o el original si falla
+ */
+function safeTranslate(text) {
+  if (!text || text.toString().trim() === '') return '';
+  try {
+    return LanguageApp.translate(text.toString().trim(), 'es', 'en');
+  } catch (e) {
+    Logger.log('⚠️ safeTranslate error: ' + e.toString());
+    return text.toString(); // fallback: devuelve el original
+  }
+}
+
+
+/**
  * Maneja las solicitudes POST del formulario web
  */
 function doPost(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var data = JSON.parse(e.postData.contents);
-    
+
     // Configura aquí la URL de tu formulario publicado en GitHub Pages
-    var FORM_URL = 'https://nuevosolinversionesrd-cloud.github.io/fichadepropiedades/index.html'; 
-    
+    var FORM_URL = 'https://nuevosolinversionesrd-cloud.github.io/fichadepropiedades/index.html';
+
     // Determinar a qué hoja enviar los datos
     var sheetName = 'Propiedades';
     var isExternal = false;
-    
+
     if (data.form_type === 'terceros' || data.isExternal) {
       sheetName = 'Publicaciones Externas';
       isExternal = true;
     }
-    
+
     var sheet = ss.getSheetByName(sheetName);
-    
+
     if (!sheet) {
       sheet = ss.insertSheet(sheetName);
       if (isExternal) {
@@ -106,14 +123,14 @@ function doPost(e) {
         addHeaders(sheet);
       }
     }
-    
+
     // Formatear timestamp en zona horaria de RD
     var timestamp = Utilities.formatDate(
-      new Date(), 
-      'America/Santo_Domingo', 
+      new Date(),
+      'America/Santo_Domingo',
       'dd/MM/yyyy HH:mm:ss'
     );
-    
+
     // Manejar carga de firma a Google Drive si existe
     var firmaUrl = 'No adjunta';
     if (data.firma_base64) {
@@ -121,7 +138,7 @@ function doPost(e) {
         var folderName = 'Firmas — Nuevo Sol';
         var folders = DriveApp.getFoldersByName(folderName);
         var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
-        
+
         var contentType = data.firma_mimetype || 'image/png';
         var decoded = Utilities.base64Decode(data.firma_base64);
         var blob = Utilities.newBlob(decoded, contentType, 'Firma_' + data.nombre.replace(/ /g, '_') + '_' + data.cedula);
@@ -131,31 +148,40 @@ function doPost(e) {
         firmaUrl = 'Error al subir: ' + fError.toString();
       }
     }
-    
+
     if (isExternal) {
-      // Guardar en Publicaciones Externas
+      // ── Traducir campos al inglés (para mostrar en la web bilingüe) ──
+      var tituloEN      = safeTranslate(data.titulo);
+      var descripcionEN = safeTranslate(data.descripcion);
+      var ubicacionEN   = safeTranslate(data.ubicacion);
+
+      // Guardar en Publicaciones Externas (versión ES + EN)
       sheet.appendRow([
         timestamp,                  // A: Timestamp
         data.nombre || '',          // B: Nombre
         data.cedula || '',          // C: Cédula / ID
         data.telefono || '',        // D: Teléfono
         data.email || '',           // E: Email
-        data.titulo || '',          // F: Título Propiedad
-        data.tipo || '',            // G: Tipo
-        data.operacion || '',       // H: Operación
-        data.precio || '',          // I: Precio
-        data.ubicacion || '',       // J: Ubicación
-        data.descripcion || '',     // K: Descripción
-        data.fotos_link || '',      // L: Link Fotos
-        firmaUrl,                   // M: Firma Digital (URL Drive)
-        data.terminos ? 'Aceptado' : 'No Aceptado', // N: Términos
-        data.comision_acepta ? 'Aceptado (2%)' : 'No Aceptado' // O: Comisión
+        data.titulo || '',          // F: Título (ES)
+        tituloEN,                   // G: Título (EN)
+        data.tipo || '',            // H: Tipo
+        data.operacion || '',       // I: Operación
+        data.precio || '',          // J: Precio
+        data.ubicacion || '',       // K: Ubicación (ES)
+        ubicacionEN,                // L: Ubicación (EN)
+        data.descripcion || '',     // M: Descripción (ES)
+        descripcionEN,              // N: Descripción (EN)
+        data.fotos_link || '',      // O: Link Fotos
+        firmaUrl,                   // P: Firma Digital (URL Drive)
+        data.terminos ? 'Aceptado' : 'No Aceptado', // Q: Términos
+        data.comision_acepta ? 'Aceptado (2%)' : 'No Aceptado', // R: Comisión
+        data.user_uid || ''         // S: Firebase UID
       ]);
     } else {
       // Guardar en Propiedades (Original)
       var refId = data.referencia_id || '';
       var rowToUpdate = -1;
-      
+
       // Buscar si la referencia ya existe
       if (refId) {
         var values = sheet.getRange(2, 2, sheet.getLastRow(), 1).getValues();
@@ -168,7 +194,7 @@ function doPost(e) {
       }
 
       var editLink = '=HYPERLINK("' + FORM_URL + '?ref=' + refId + '"; "✏️ Editar")';
-      
+
       var rowData = [
         timestamp,                        // A: Timestamp
         refId,                            // B: Referencia ID
@@ -215,19 +241,19 @@ function doPost(e) {
         sheet.appendRow(rowData);
       }
     }
-    
+
     // Actualizar Config con último registro
     updateConfig(ss, timestamp, data.referencia_id || data.nombre);
-    
+
     // Actualizar Dashboard (solo para propiedades internas por ahora)
     if (!isExternal) {
       updateDashboard(ss);
     }
-    
+
     return ContentService.createTextOutput(
       JSON.stringify({ status: 'success', message: 'Registro completado exitosamente' })
     ).setMimeType(ContentService.MimeType.JSON);
-    
+
   } catch (error) {
     return ContentService.createTextOutput(
       JSON.stringify({ status: 'error', message: error.toString() })
@@ -237,27 +263,43 @@ function doPost(e) {
 
 /**
  * Agrega los headers a la hoja de Publicaciones Externas
+ * (bilingüe: campos ES y EN separados)
  */
 function addExternalHeaders(sheet) {
   var headers = [
-    'Timestamp', 'Nombre', 'Cédula / ID', 'Teléfono', 'Email', 
-    'Título Propiedad', 'Tipo', 'Operación', 'Precio (USD)', 
-    'Ubicación', 'Descripción', 'Link Fotos', 'Firma Digital', 
-    'Aceptación Términos', 'Aceptación Comisión'
+    'Timestamp',         // A
+    'Nombre',            // B
+    'Cédula / ID',       // C
+    'Teléfono',          // D
+    'Email',             // E
+    'Título (ES)',        // F
+    'Título (EN)',        // G
+    'Tipo',              // H
+    'Operación',         // I
+    'Precio (USD)',       // J
+    'Ubicación (ES)',     // K
+    'Ubicación (EN)',     // L
+    'Descripción (ES)',   // M
+    'Descripción (EN)',   // N
+    'Link Fotos',        // O
+    'Firma Digital',     // P
+    'Aceptación Términos', // Q
+    'Aceptación Comisión', // R
+    'Firebase UID'       // S
   ];
-  
+
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  
+
   // Formatear headers
   var headerRange = sheet.getRange(1, 1, 1, headers.length);
   headerRange.setFontWeight('bold');
   headerRange.setBackground('#E79E24');
   headerRange.setFontColor('#ffffff');
   headerRange.setFontSize(10);
-  
+
   // Congelar fila de headers
   sheet.setFrozenRows(1);
-  
+
   // Ajustar anchos de columnas
   for (var i = 1; i <= headers.length; i++) {
     sheet.setColumnWidth(i, 160);
@@ -269,17 +311,17 @@ function addExternalHeaders(sheet) {
  */
 function doGet(e) {
   var action = e.parameter.action;
-  
+
   if (action === 'getProperty') {
     var ref = e.parameter.ref;
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName('Propiedades');
     var data = sheet.getDataRange().getValues();
-    
+
     // Headers para mapeo
     var headers = data[0];
     var property = null;
-    
+
     for (var i = 1; i < data.length; i++) {
       if (data[i][1] === ref) { // Columna B: Referencia ID
         property = {};
@@ -289,15 +331,15 @@ function doGet(e) {
         break;
       }
     }
-    
+
     return ContentService.createTextOutput(
       JSON.stringify(property)
     ).setMimeType(ContentService.MimeType.JSON);
   }
 
   return ContentService.createTextOutput(
-    JSON.stringify({ 
-      status: 'active', 
+    JSON.stringify({
+      status: 'active',
       message: 'Nuevo Sol Inversiones — API de Registro activa',
       version: '1.1'
     })
@@ -318,19 +360,19 @@ function addHeaders(sheet) {
     'Notas Internas', 'Cuarto de Servicio (Cant.)', 'Jacuzzi (Cant.)',
     'Antigüedad', 'Bauleras', 'Orientación', 'Amueblado'
   ];
-  
+
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  
+
   // Formatear headers
   var headerRange = sheet.getRange(1, 1, 1, headers.length);
   headerRange.setFontWeight('bold');
   headerRange.setBackground('#1a3c5e');
   headerRange.setFontColor('#ffffff');
   headerRange.setFontSize(10);
-  
+
   // Congelar fila de headers
   sheet.setFrozenRows(1);
-  
+
   // Ajustar anchos de columnas
   for (var i = 1; i <= headers.length; i++) {
     sheet.setColumnWidth(i, 140);
@@ -342,22 +384,22 @@ function addHeaders(sheet) {
  */
 function updateConfig(ss, timestamp, refId) {
   var configSheet = ss.getSheetByName('Config');
-  
+
   if (!configSheet) {
     configSheet = ss.insertSheet('Config');
     configSheet.getRange('A1').setValue('Versión');
     configSheet.getRange('B1').setValue('1.0');
     configSheet.getRange('A2').setValue('Último Registro');
     configSheet.getRange('A3').setValue('Total Propiedades');
-    
+
     // Formatear
     configSheet.getRange('A1:A3').setFontWeight('bold');
     configSheet.setColumnWidth(1, 180);
     configSheet.setColumnWidth(2, 250);
   }
-  
+
   configSheet.getRange('B2').setValue(timestamp + ' — ' + (refId || 'Sin Ref'));
-  
+
   var propSheet = ss.getSheetByName('Propiedades');
   if (propSheet) {
     var totalRows = Math.max(0, propSheet.getLastRow() - 1);
@@ -370,85 +412,85 @@ function updateConfig(ss, timestamp, refId) {
  */
 function updateDashboard(ss) {
   var dashSheet = ss.getSheetByName('Dashboard');
-  
+
   if (!dashSheet) {
     dashSheet = ss.insertSheet('Dashboard');
   }
-  
+
   var propSheet = ss.getSheetByName('Propiedades');
   if (!propSheet) return;
-  
+
   var lastRow = propSheet.getLastRow();
   if (lastRow < 2) return; // No hay datos aún
-  
+
   // Limpiar dashboard
   dashSheet.clear();
-  
+
   // --- TÍTULO ---
   dashSheet.getRange('A1').setValue('📊 DASHBOARD — NUEVO SOL INVERSIONES');
   dashSheet.getRange('A1').setFontSize(14).setFontWeight('bold').setFontColor('#1a3c5e');
   dashSheet.getRange('A2').setValue('Actualizado: ' + Utilities.formatDate(new Date(), 'America/Santo_Domingo', 'dd/MM/yyyy HH:mm'));
   dashSheet.getRange('A2').setFontSize(10).setFontColor('#888');
-  
+
   // --- RESUMEN GENERAL ---
   dashSheet.getRange('A4').setValue('📋 RESUMEN GENERAL').setFontWeight('bold').setFontSize(12).setFontColor('#2e6da4');
-  
+
   var totalProps = lastRow - 1;
   dashSheet.getRange('A5').setValue('Total Propiedades Registradas');
   dashSheet.getRange('B5').setValue(totalProps).setFontWeight('bold').setFontSize(14);
-  
+
   // --- POR ESTADO ---
   dashSheet.getRange('A7').setValue('🏗️ POR ESTADO').setFontWeight('bold').setFontSize(12).setFontColor('#2e6da4');
-  
+
   var estados = {};
   if (lastRow >= 2) {
     var estadoData = propSheet.getRange(2, 9, lastRow - 1, 1).getValues(); // Columna I
-    estadoData.forEach(function(row) {
+    estadoData.forEach(function (row) {
       var val = row[0] ? row[0].toString().trim() : 'Sin especificar';
       estados[val] = (estados[val] || 0) + 1;
     });
   }
-  
+
   var row = 8;
   for (var estado in estados) {
     dashSheet.getRange('A' + row).setValue(estado);
     dashSheet.getRange('B' + row).setValue(estados[estado]).setFontWeight('bold');
     row++;
   }
-  
+
   // --- POR CIUDAD ---
   row += 1;
   dashSheet.getRange('A' + row).setValue('🌆 POR CIUDAD').setFontWeight('bold').setFontSize(12).setFontColor('#2e6da4');
   row++;
-  
+
   var ciudades = {};
   if (lastRow >= 2) {
     var ciudadData = propSheet.getRange(2, 8, lastRow - 1, 1).getValues(); // Columna H
-    ciudadData.forEach(function(r) {
+    ciudadData.forEach(function (r) {
       var val = r[0] ? r[0].toString().trim() : 'Sin especificar';
       ciudades[val] = (ciudades[val] || 0) + 1;
     });
   }
-  
+
   for (var ciudad in ciudades) {
     dashSheet.getRange('A' + row).setValue(ciudad);
     dashSheet.getRange('B' + row).setValue(ciudades[ciudad]).setFontWeight('bold');
     row++;
   }
-  
+
   // --- RANGO DE PRECIOS ---
   row += 1;
   dashSheet.getRange('A' + row).setValue('💰 RANGO DE PRECIOS').setFontWeight('bold').setFontSize(12).setFontColor('#2e6da4');
   row++;
-  
+
   if (lastRow >= 2) {
     var precioData = propSheet.getRange(2, 6, lastRow - 1, 1).getValues(); // Columna F
     var precios = [];
-    precioData.forEach(function(r) {
+    precioData.forEach(function (r) {
       var val = parseFloat(r[0].toString().replace(/[^0-9.]/g, ''));
       if (!isNaN(val) && val > 0) precios.push(val);
     });
-    
+
     if (precios.length > 0) {
       dashSheet.getRange('A' + row).setValue('Precio Mínimo');
       dashSheet.getRange('B' + row).setValue('$' + Math.min.apply(null, precios).toLocaleString());
@@ -456,14 +498,14 @@ function updateDashboard(ss) {
       dashSheet.getRange('A' + row).setValue('Precio Máximo');
       dashSheet.getRange('B' + row).setValue('$' + Math.max.apply(null, precios).toLocaleString());
       row++;
-      var avg = precios.reduce(function(a, b) { return a + b; }, 0) / precios.length;
+      var avg = precios.reduce(function (a, b) { return a + b; }, 0) / precios.length;
       dashSheet.getRange('A' + row).setValue('Precio Promedio');
       dashSheet.getRange('B' + row).setValue('$' + Math.round(avg).toLocaleString());
     } else {
       dashSheet.getRange('A' + row).setValue('Sin datos de precios aún');
     }
   }
-  
+
   // Ajustar columnas
   dashSheet.setColumnWidth(1, 280);
   dashSheet.setColumnWidth(2, 180);
@@ -476,7 +518,7 @@ function updateDashboard(ss) {
  */
 function inicializarHojas() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  
+
   // Crear hoja Propiedades si no existe
   var propSheet = ss.getSheetByName('Propiedades');
   if (!propSheet) {
@@ -486,7 +528,7 @@ function inicializarHojas() {
   } else {
     Logger.log('ℹ️ Hoja "Propiedades" ya existe');
   }
-  
+
   // Crear hoja Dashboard si no existe
   var dashSheet = ss.getSheetByName('Dashboard');
   if (!dashSheet) {
@@ -498,7 +540,7 @@ function inicializarHojas() {
   } else {
     Logger.log('ℹ️ Hoja "Dashboard" ya existe');
   }
-  
+
   // Crear hoja Config si no existe
   var configSheet = ss.getSheetByName('Config');
   if (!configSheet) {
@@ -516,7 +558,7 @@ function inicializarHojas() {
   } else {
     Logger.log('ℹ️ Hoja "Config" ya existe');
   }
-  
+
   Logger.log('🎉 Inicialización completada');
 }
 
@@ -527,7 +569,7 @@ function inicializarHojas() {
 function actualizarHeadersManual() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('Propiedades');
-  
+
   if (!sheet) {
     Logger.log('❌ No se encontró la hoja "Propiedades"');
     return;
@@ -537,13 +579,13 @@ function actualizarHeadersManual() {
   var headerC = sheet.getRange(1, 3).getValue();
   var headerD = sheet.getRange(1, 4).getValue();
   var lastRow = sheet.getLastRow();
-  
+
   // CASO: La columna "Editar" ya existe pero los datos están desplazados (como en tu captura)
   if (headerC === 'Editar' && lastRow >= 2) {
     // Revisamos si la columna D tiene errores o está vacía mientras la E tiene el título
     var testCellD = sheet.getRange(2, 4).getValue(); // D2
     var testCellE = sheet.getRange(2, 5).getValue(); // E2
-    
+
     // Si D está mal y E parece tener datos que deberían estar en D
     if ((testCellD === '' || testCellD.toString().includes('#')) && testCellE !== '') {
       Logger.log('⚠️ Detectada desalineación. Corrigiendo...');
@@ -553,7 +595,7 @@ function actualizarHeadersManual() {
       dataRange.moveTo(sheet.getRange(2, 4));
       Logger.log('✅ Datos desplazados a la izquierda correctamente');
     }
-  } 
+  }
   // CASO: Aún no existe la columna "Editar"
   else if (headerC !== 'Editar') {
     sheet.insertColumnBefore(3);
@@ -571,17 +613,17 @@ function actualizarHeadersManual() {
     'Notas Internas', 'Cuarto de Servicio (Cant.)', 'Jacuzzi (Cant.)',
     'Antigüedad', 'Bauleras', 'Orientación', 'Amueblado'
   ];
-  
+
   // 3. Aplicar headers a la primera fila (esto asegura que los nombres coincidan)
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  
+
   // 4. Formatear headers
   var headerRange = sheet.getRange(1, 1, 1, headers.length);
   headerRange.setFontWeight('bold');
   headerRange.setBackground('#1a3c5e');
   headerRange.setFontColor('#ffffff');
   headerRange.setFontSize(10);
-  
+
   // 5. Generar/Actualizar los enlaces de edición
   var FORM_URL = 'https://nuevosolinversionesrd-cloud.github.io/fichadepropiedades/index.html';
   if (lastRow >= 2) {
@@ -597,12 +639,12 @@ function actualizarHeadersManual() {
     }
     sheet.getRange(2, 3, editLinks.length, 1).setValues(editLinks);
   }
-  
+
   // 6. Ajustar anchos
   for (var i = 1; i <= headers.length; i++) {
     sheet.setColumnWidth(i, 140);
   }
-  
+
   Logger.log('🎉 Proceso completado. Hoja sincronizada.');
 }
 
